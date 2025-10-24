@@ -1,91 +1,85 @@
-**E-DAIC_Transcription**
+# E-DAIC_Transcription
 
-Batch pipeline to produce higher-quality, time-aligned transcripts for the Extended Distress Analysis Interview Corpus (E-DAIC) audio. The script enhances speech, isolates vocals, diarizes speakers, performs ASR with word timestamps, merges with diarization, and optionally LLM-cleans while preserving timestamps.
+Batch pipeline for higher-quality, time-aligned transcripts of E-DAIC audio. It enhances speech, isolates vocals, diarizes speakers, runs ASR with word timestamps, aligns words to diarization, and optionally performs constrained LLM cleanup while preserving timestamps.
 
-**Dataset context**
+## Dataset context
 
-E-DAIC extends DAIC-WOZ with semi-clinical interviews conducted by the virtual interviewer “Ellie.” WoZ sessions are human-operated; other sessions are fully autonomous. Train/dev include both; test is autonomous only. Session IDs 300–492 are WoZ and 600–718 are autonomous. Each participant folder typically contains XXX_AUDIO.wav, XXX_Transcript.csv, and precomputed audio/visual features; labels include PHQ-8 and PTSD (PCL-C) fields and item-level PHQ-8 responses. 
+E-DAIC extends DAIC-WOZ with semi-clinical interviews by the virtual interviewer “Ellie.” Wizard-of-Oz (WoZ) sessions are human-operated; others are autonomous. Train and dev include both; test is autonomous only. Typical per-participant files include `XXX_AUDIO.wav`, `XXX_Transcript.csv`, precomputed audio/visual features, and labels such as PHQ-8 and PTSD (PCL-C) with item-level PHQ-8 responses.
 
-**What this script does**
+## Pipeline
 
-batch_asr_pipeline.py processes .wav files in bulk:
+1. **Analyze audio → adaptive knobs**  
+   Computes RMS and SNR, rumble and hiss, DC offset. Derives per-file HP and LP, RNNoise mix, de-esser, gate, compression, and EQ.
 
-Analyze audio → adaptive knobs
-Measures RMS/SNR, spectral “rumble”/“hiss,” DC offset, and derives per-file parameters for HP/LP filters, RNNoise mix, de-esser, gating, compression, and EQ.
+2. **Speech enhancement and denoising (FFmpeg)**  
+   `dynaudnorm` + `dcshift` → low-band EQ cuts → high-pass → optional RNNoise (`arnndn`) + `afftdn` → presence EQ, de-essing, gating, compression, limiting.
 
-Speech enhancement and denoising (FFmpeg)
-Adaptive chain with dynaudnorm + dcshift → low-band EQ cuts → high-pass → optional RNNoise (arnndn) + afftdn → additional presence EQ, de-essing, gating, compression, and limiting.
+3. **Source separation (Demucs)**  
+   Splits to `vocals.wav` and `no_vocals.wav`. Applies tailored denoise and EQ per stem. Remixes at 16 kHz with residual about 8 dB below vocals.
 
-Source separation (Demucs)
-Splits to vocals.wav and no_vocals.wav; applies tailored denoise/EQ to each; remixes at 16 kHz with residual kept ~8 dB below vocals.
+4. **Speaker diarization (pyannote 3.1)**  
+   Runs `pyannote/speaker-diarization-3.1` and writes `*_segments.csv`.
 
-Speaker diarization (pyannote 3.1)
-Runs pyannote/speaker-diarization-3.1 at 16 kHz and saves *_segments.csv.
+5. **ASR (faster-whisper)**  
+   Word-timestamp decoding with VAD and fallback temperatures. Chunks audio, removes repeated 6-grams, writes `*_mix_words.json`.
 
-ASR (faster-whisper)
-Word-timestamp decoding with fallback temperatures and VAD. Chunks audio, removes repeated 6-grams, writes *_mix_words.json.
+6. **Align words to speakers**  
+   Labels words by overlap with diarization spans. Estimates max same-speaker gap. Groups into turns. Fixes boundary fragments.
 
-Align words to speakers
-Labels each word by overlap with diarization spans; estimates max same-speaker gap; groups into turns; fixes boundary fragments.
+7. **Outputs transcripts**  
+   - `*_mix_transcript_labeled.txt` and `.jsonl` with turn start and end.  
+   - `*_cleaned.txt` with role-aware lines and preserved timestamps. With `--use-llm`, applies constrained cleanup that keeps line count and timestamps fixed.
 
-Outputs transcripts
+8. **Optional cleanup**  
+   `--keep-only-cleaned` removes intermediates.
 
-*_mix_transcript_labeled.txt and *_mix_transcript_labeled.jsonl (speaker turns with start/end per turn).
+## Relation to other E-DAIC modalities
 
-*_cleaned.txt: role-aware lines with preserved timestamps. If --use-llm, performs constrained LLM cleanup that keeps line count and timestamps fixed.
+Targets the audio channel (`XXX_AUDIO.wav`). Downstream you can join with distributed features for multimodal work (OpenSMILE eGeMAPS and MFCC BoAW, DenseNet or VGG spectrogram embeddings, OpenFace pose, gaze, and AUs) and label files (PHQ-8, PCL-C).
 
-Optional cleanup
---keep-only-cleaned prunes intermediates.
+## Requirements
 
-Relation to other E-DAIC modalities
+- Python 3.10+
+- FFmpeg (with `arnndn` recommended)
+- RNNoise `.rnnn` model for `--rnnoise-model`
+- Demucs CLI
+- PyTorch (CUDA optional)
+- `pyannote.audio` with `pyannote/speaker-diarization-3.1`
+- `faster-whisper`
 
-This pipeline targets the audio channel (XXX_AUDIO.wav). It can be combined downstream with E-DAIC’s distributed features for multimodal modeling (OpenSMILE eGeMAPS/MFCC BoAW, DenseNet/VGG audio spectrogram embeddings, OpenFace pose/gaze/AUs, and train/dev/test label files with PHQ-8 and PCL-C). 
-
-**Requirements**
-
-Python 3.10+
-FFmpeg built with arnndn (optional but recommended)
-RNNoise .rnnn model file for --rnnoise-model
-Demucs (CLI)
-PyTorch with CUDA if available
-pyannote.audio pipeline pyannote/speaker-diarization-3.1 (HF auth if required)
-faster-whisper
 GPU is optional but speeds Demucs, pyannote, and Whisper.
 
-**Installation (minimal)**
+## Installation
+
+```bash
 pip install numpy pandas soundfile torch faster-whisper pyannote.audio
-# install demucs CLI; ensure ffmpeg is on PATH and built with arnndn
+# install demucs CLI; ensure ffmpeg is on PATH and supports arnndn
+```
 
-**Usage**
+## Usage
 
-python batch_asr_pipeline.py \
-  --in-dir /path/to/wavs \
-  --out-dir /path/to/out \
-  --rnnoise-model /path/to/quiet.rnnn \
-  --demucs-device auto --demucs-model htdemucs \
-  --asr-model large-v3 --asr-device auto --asr-compute auto \
-  --auto-gap --speaker-switch-pad 0.2 \
-  --use-llm --openai-model gpt-4.1-mini --temperature 0.0 \
-  --keep-only-cleaned
+```bash
+python batch_asr_pipeline.py   --in-dir /path/to/wavs   --out-dir /path/to/out   --rnnoise-model /path/to/quiet.rnnn   --demucs-device auto --demucs-model htdemucs   --asr-model large-v3 --asr-device auto --asr-compute auto   --auto-gap --speaker-switch-pad 0.2   --use-llm --openai-model gpt-4.1-mini --temperature 0.0   --keep-only-cleaned
+```
 
-Input expectation: flat directory of .wav files. The script creates one work folder per file under --out-dir.
+> Input: flat directory of `.wav` files. One work folder per file is created under `--out-dir`.
 
-**Key outputs per file**
+## Key outputs per file
 
+```
 <OUT>/<BASE>/
-  *_vocal_16k.wav             # enhanced vocals
-  *_residual_16k.wav          # denoised residual
-  *_mix_16k.wav               # adaptive remix for diarization/ASR
-  *_segments.csv              # diarization turns
-  *_mix_words.json            # word-level timestamps
+  *_vocal_16k.wav               # enhanced vocals
+  *_residual_16k.wav            # denoised residual
+  *_mix_16k.wav                 # remix for diarization/ASR
+  *_segments.csv                # diarization turns
+  *_mix_words.json              # word-level timestamps
   *_mix_transcript_labeled.txt
   *_mix_transcript_labeled.jsonl
-  *_cleaned.txt               # final timestamped dialogue
+  *_cleaned.txt                 # final timestamped dialogue
+```
 
-**References**
-  
-  Gratch J, Artstein R, Lucas GM, Stratou G, Scherer S, Nazarian A, Wood R, Boberg J, DeVault D, Marsella S, Traum DR. The Distress Analysis Interview Corpus of Human and Computer Interviews. In Proceedings of LREC 2014 May (pp. 3123-3128).
+## References
 
-  DeVault, D., Artstein, R., Benn, G., Dey, T., Fast, E., Gainer, A., Georgila, K., Gratch, J., Hartholt, A., Lhommet, M., Lucas, G., Marsella, S., Morbini, F., Nazarian, A., Scherer, S., Stratou, G., Suri, A., Traum, D., Wood, R., Xu, Y., Rizzo, A., and Morency, L.-P. (2014). “SimSensei kiosk: A virtual human interviewer for healthcare decision support.” In Proceedings of the 13th International Conference on Autonomous Agents and Multiagent Systems (AAMAS’14), Paris.
-
-  Ringeval, Fabien, Björn Schuller, Michel Valstar, Nicholas Cummins, Roddy Cowie, Leili Tavabi, Maximilian Schmitt et al. “Avec 2019 workshop and challenge: State-of-mind, detecting depression with ai, and cross-cultural affect recognition.” In Proceedings of the 9th International on Audio/Visual Emotion Challenge and Workshop, pp. 3-12. ACM, 2019.
+- Gratch J, Artstein R, Lucas GM, Stratou G, Scherer S, Nazarian A, Wood R, Boberg J, DeVault D, Marsella S, Traum DR. The Distress Analysis Interview Corpus of Human and Computer Interviews. In: LREC 2014. pp. 3123-3128.
+- DeVault D, Artstein R, Benn G, Dey T, Fast E, Gainer A, Georgila K, Gratch J, Hartholt A, Lhommet M, Lucas G, Marsella S, Morbini F, Nazarian A, Scherer S, Stratou G, Suri A, Traum D, Wood R, Xu Y, Rizzo A, Morency L-P. SimSensei kiosk: A virtual human interviewer for healthcare decision support. In: AAMAS 2014.
+- Ringeval F, Schuller B, Valstar M, Cummins N, Cowie R, Tavabi L, Schmitt M, et al. AVEC 2019: State-of-mind, depression detection, and cross-cultural affect recognition. In: AVEC 2019. pp. 3-12. ACM.
