@@ -1,16 +1,12 @@
-E-DAIC_Transcription
+**E-DAIC_Transcription**
 
 Batch pipeline to produce higher-quality, time-aligned transcripts for the Extended Distress Analysis Interview Corpus (E-DAIC) audio. The script enhances speech, isolates vocals, diarizes speakers, performs ASR with word timestamps, merges with diarization, and optionally LLM-cleans while preserving timestamps.
 
-Dataset context
+**Dataset context**
 
 E-DAIC extends DAIC-WOZ with semi-clinical interviews conducted by the virtual interviewer “Ellie.” WoZ sessions are human-operated; other sessions are fully autonomous. Train/dev include both; test is autonomous only. Session IDs 300–492 are WoZ and 600–718 are autonomous. Each participant folder typically contains XXX_AUDIO.wav, XXX_Transcript.csv, and precomputed audio/visual features; labels include PHQ-8 and PTSD (PCL-C) fields and item-level PHQ-8 responses. 
-DAIC-WOZ
-+2
-DAIC-WOZ
-+2
 
-What this script does
+**What this script does**
 
 batch_asr_pipeline.py processes .wav files in bulk:
 
@@ -44,34 +40,24 @@ Optional cleanup
 Relation to other E-DAIC modalities
 
 This pipeline targets the audio channel (XXX_AUDIO.wav). It can be combined downstream with E-DAIC’s distributed features for multimodal modeling (OpenSMILE eGeMAPS/MFCC BoAW, DenseNet/VGG audio spectrogram embeddings, OpenFace pose/gaze/AUs, and train/dev/test label files with PHQ-8 and PCL-C). 
-DAIC-WOZ
-+2
-DAIC-WOZ
-+2
 
-Requirements
+**Requirements**
 
 Python 3.10+
-
 FFmpeg built with arnndn (optional but recommended)
-
 RNNoise .rnnn model file for --rnnoise-model
-
 Demucs (CLI)
-
 PyTorch with CUDA if available
-
 pyannote.audio pipeline pyannote/speaker-diarization-3.1 (HF auth if required)
-
 faster-whisper
-
 GPU is optional but speeds Demucs, pyannote, and Whisper.
 
-Installation (minimal)
+**Installation (minimal)**
 pip install numpy pandas soundfile torch faster-whisper pyannote.audio
 # install demucs CLI; ensure ffmpeg is on PATH and built with arnndn
 
-Usage
+**Usage**
+
 python batch_asr_pipeline.py \
   --in-dir /path/to/wavs \
   --out-dir /path/to/out \
@@ -82,10 +68,10 @@ python batch_asr_pipeline.py \
   --use-llm --openai-model gpt-4.1-mini --temperature 0.0 \
   --keep-only-cleaned
 
-
 Input expectation: flat directory of .wav files. The script creates one work folder per file under --out-dir.
 
-Key outputs per file
+**Key outputs per file**
+
 <OUT>/<BASE>/
   *_vocal_16k.wav             # enhanced vocals
   *_residual_16k.wav          # denoised residual
@@ -96,7 +82,7 @@ Key outputs per file
   *_mix_transcript_labeled.jsonl
   *_cleaned.txt               # final timestamped dialogue
 
-References
+**References**
   
   Gratch J, Artstein R, Lucas GM, Stratou G, Scherer S, Nazarian A, Wood R, Boberg J, DeVault D, Marsella S, Traum DR. The Distress Analysis Interview Corpus of Human and Computer Interviews. In Proceedings of LREC 2014 May (pp. 3123-3128).
 
