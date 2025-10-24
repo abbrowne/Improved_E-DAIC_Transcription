@@ -1,4 +1,4 @@
-# E-DAIC_Transcription
+# Improved E-DAIC_Transcription
 
 Batch pipeline for higher-quality, time-aligned transcripts of E-DAIC audio. It enhances speech, isolates vocals, diarizes speakers, runs ASR with word timestamps, aligns words to diarization, and optionally performs constrained LLM cleanup while preserving timestamps.
 
